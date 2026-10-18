@@ -1,0 +1,104 @@
+-- =======================================================
+-- FINAL BUG-FREE NATIVE AIR SLIDE BYPASS FOR RIVALS
+-- =======================================================
+-- Fixed the walking/flying bug using precise height raycast validation.
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- Engine Configuration
+local SLIDE_LIFESPAN = 0.42       -- Timeframe the air floor stays alive under your feet
+local FLOOR_HEIGHT_OFFSET = -3.05 -- Hard-locked grid level to completely eliminate camera jitters
+local MIN_AIR_HEIGHT = 2.5        -- MUST be at least this many studs off the ground to trigger (prevents walking bugs)
+
+local activeFloorInstance = nil
+local slideThreadActive = false
+
+-- Raycast engine to verify the player is actually high in the air and not just walking
+local function isGenuineAirborne(rootPart)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterGroupNames = {"Players"} -- Ignore other players
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    
+    -- Cast a ray straight down from your feet
+    local raycastResult = Workspace:Raycast(rootPart.Position, Vector3.new(0, -15, 0), raycastParams)
+    
+    if raycastResult then
+        local distanceToGround = rootPart.Position.Y - raycastResult.Position.Y
+        -- If the ground is close, you are just walking/stepping. Do not trigger.
+        if distanceToGround < MIN_AIR_HEIGHT then
+            return false
+        end
+    end
+    return true
+end
+
+-- Ultra-stable grid assembly function
+local function deployPhysicsGrid(rootPart)
+    if activeFloorInstance then activeFloorInstance:Destroy() end
+    
+    local airGrid = Instance.new("Part")
+    airGrid.Name = "RivalsPurePhysicsGrid"
+    airGrid.Size = Vector3.new(12, 0.2, 12) -- Wide footprint to make sure your feet stay planted cleanly
+    airGrid.Anchored = true
+    airGrid.CanCollide = true
+    airGrid.Transparency = 1 -- 100% Invisible
+    airGrid.Material = Enum.Material.SmoothPlastic
+    airGrid.Friction = 0 -- Eliminates all physical drag slow-downs
+    airGrid.Parent = workspace
+    
+    activeFloorInstance = airGrid
+    
+    local frameRenderLock
+    frameRenderLock = RunService.PreRender:Connect(function()
+        if not slideThreadActive or not rootPart or not rootPart.Parent or activeFloorInstance ~= airGrid then
+            if frameRenderLock then frameRenderLock:Disconnect() end
+            airGrid:Destroy()
+            return
+        end
+        airGrid.CFrame = rootPart.CFrame * CFrame.new(0, FLOOR_HEIGHT_OFFSET, 0)
+    end)
+end
+
+-- Core input bridge execution logic
+local function handlePureAirSlide()
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    
+    if not rootPart or not humanoid or slideThreadActive then return end
+    
+    -- Double-check: Must be in Air material AND clear of the walking height threshold
+    if humanoid.FloorMaterial == Enum.Material.Air and isGenuineAirborne(rootPart) then
+        slideThreadActive = true
+        
+        deployPhysicsGrid(rootPart)
+        
+        task.wait(SLIDE_LIFESPAN)
+        
+        slideThreadActive = false
+        if activeFloorInstance then
+            activeFloorInstance:Destroy()
+            activeFloorInstance = nil
+        end
+    end
+end
+
+-- Hook directly into raw input systems (Works seamlessly for L-Ctrl, C, and Mobile Crouching Taps)
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C or input.UserInputType == Enum.UserInputType.Touch then
+        
+        task.defer(function()
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoid and humanoid.FloorMaterial == Enum.Material.Air then
+                handlePureAirSlide()
+            end
+        end)
+    end
+end)
